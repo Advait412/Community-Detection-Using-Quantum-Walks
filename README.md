@@ -1,0 +1,1 @@
+This Project was done under the supervision of Professor MS Santhanam of IISER Pune and in collaboration with my senior Nisarg Vyas. We tried to use Modified Quantum walks to detect communities in a Complex Network
