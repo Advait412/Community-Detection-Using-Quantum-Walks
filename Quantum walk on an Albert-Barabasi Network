@@ -1,0 +1,91 @@
+# QUANTUM WALK ON ANY NETWORK WITHOUT SELF LOOPS
+import math
+import cmath
+import numpy as np
+import matplotlib.pyplot as plt
+
+s_intl = 0 # initial position
+p_intl = 0 # initial spin
+Steps  = 100000000000 # number of steps in the walk
+
+# Loading the matrix
+adj_matrix = np.load("Barabasi_Network5.npy", allow_pickle=True)
+
+# Defining parameters
+degrees = np.array([])
+for i in range(len(adj_matrix)):
+    deg = np.sum(adj_matrix[i])
+    degrees = np.append(degrees,deg)
+
+N = len(adj_matrix)
+dim_space = int(np.sum(degrees))
+
+# Defining the S-operator -clear
+S = np.zeros((dim_space,dim_space))
+for i in range(N):
+    for j in range(i,N):
+        if adj_matrix[i][j] !=0:
+            spin_i = 0
+            spin_j = 0
+            for k in range(j+1):           # prone to error
+                spin_i+= adj_matrix[i][k]
+            for k in range(i+1):
+                spin_j+= adj_matrix[j][k]
+            I = 0 ; J = 0
+            for n in range(i):
+                I+= degrees[n]
+            for n in range(j):
+                J+= degrees[n]
+            I = int(I +spin_i-1)
+            J = int(J +spin_j-1)
+            S[I][J] = 1 ; S[J][I] = 1
+
+# Defining Coin operator -clear
+Coin = np.zeros((dim_space,dim_space), dtype=np.complex128)
+mark = 0
+for n1 in degrees:
+    n = int(n1)
+    DFT =np.zeros((n,n), dtype=np.complex128)
+    w = cmath.rect(1, 2*math.pi/n)
+    for i in range(n):
+        for j in range(n):
+            Coin[mark+i][mark+j] = w**(i*j)/ math.sqrt(n)
+    mark+=n
+
+# THE OPERATOR FOR QUANTUM WALK
+U = np.dot(S,Coin)
+
+# Defining initial state
+state_intl = np.zeros(dim_space, dtype=float)
+state_intl[0] = 1
+
+# Applying the operator
+state = np.dot(np.linalg.matrix_power(U,Steps ),state_intl)
+
+                     # PLOTTING
+# Compute probability
+probability = []
+index = 0
+degrees = degrees.astype(int)
+for deg in degrees:
+    block = state[index:index +deg]
+    prob = np.sum(np.abs(block)**2)
+    probability.append(prob)
+    index += deg
+
+
+# Plot probability distribution
+plt.scatter(degrees, probability)
+plt.xlabel("Degree of Vertex")
+plt.ylabel("Probability")
+plt.title("Quantum Walk on scalefree network(size="+str(N)+") (steps="+str(Steps)+")(pos=1)(spin=1) DFT_operator ")
+plt.show()
+
+
+
+
+
+
+
+
+
