@@ -1,0 +1,132 @@
+import math
+import cmath
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+
+# Load Karate Club Network
+G = nx.karate_club_graph()
+N = G.number_of_nodes()
+
+# Mapping for directed edges 
+directed_edges = []
+for u in G.nodes():
+    for v in G.neighbors(u):
+        directed_edges.append((u, v))  # List of directed edges
+
+dim_space = len(directed_edges)
+edge_to_idx = {}
+for index, edge in enumerate(directed_edges):
+    edge_to_idx[edge] = index  # Dictionary of Edges and their index
+
+# Shift Operator  
+S = np.zeros((dim_space, dim_space), dtype=np.complex128)
+for u, v in directed_edges:
+    S[edge_to_idx[(v, u)], edge_to_idx[(u, v)]] = 1.0  
+
+# Coin Operator  
+Coin = np.zeros((dim_space, dim_space), dtype=np.complex128)
+for u in G.nodes():
+    neighbors = list(G.neighbors(u))
+    d_u = len(neighbors)
+    w = cmath.rect(1, 2 * math.pi / d_u) # DFT Coin
+    
+    for i, v1 in enumerate(neighbors):
+        for j, v2 in enumerate(neighbors):
+            idx1 = edge_to_idx[(u, v1)]
+            idx2 = edge_to_idx[(u, v2)]
+            Coin[idx1, idx2] = w**(i * j) / math.sqrt(d_u)
+
+# Overall Operator
+U = np.dot(S, Coin)
+
+# First assign nodes to new communities
+communities = []
+for n in G.nodes():
+    communities.append([n])
+
+# Loop until we get only 2 communities 
+while len(communities) > 2:
+    # Randomly choose a community
+    idx_chosen = np.random.randint(len(communities))
+    C_chosen = communities[idx_chosen]
+    
+    # Distribute probability amplitude equally among all members
+    state = np.zeros(dim_space, dtype=np.complex128)
+    relevant_edges = []
+    for u in C_chosen:
+        for v in G.neighbors(u):
+            relevant_edges.append(edge_to_idx[(u, v)])
+            
+    K = len(relevant_edges)
+    for idx in relevant_edges:
+        state[idx] = 1.0 / math.sqrt(K)
+        
+    # Run quantum walk 
+    Steps = 10
+    # T will hold the time series for each current community
+    T = np.zeros((len(communities), Steps))
+    
+    for step in range(Steps):
+        state = np.dot(U, state)
+        probs = np.abs(state)**2
+        
+        # Calculate probability at each node
+        node_probs = np.zeros(N)
+        for idx_e, (u, v) in enumerate(directed_edges):
+            node_probs[u] += probs[idx_e]
+            
+        # Get the average probability over nodes for each community  
+        for c_idx, comm in enumerate(communities):
+            comm_probs = []
+            for node in comm:
+                comm_probs.append(node_probs[node])
+            T[c_idx, step] = np.mean(comm_probs)
+                  
+    # Find covariance with the initially chosen community
+    max_cov = -np.inf
+    best_merge_idx = -1
+    T_chosen = T[idx_chosen]
+    
+    for c_idx in range(len(communities)):
+        if c_idx == idx_chosen:
+            continue
+        # np.cov returns a 2x2 matrix, [0, 1] is the covariance between the two arrays
+        cov = np.cov(T_chosen, T[c_idx])[0, 1] 
+        
+        if cov > max_cov:
+            max_cov = cov
+            best_merge_idx = c_idx
+            
+    # Merge the chosen community with the one with maximum covariance
+    communities[idx_chosen].extend(communities[best_merge_idx])
+    communities.pop(best_merge_idx)
+
+# Writing Text File
+actual_comms = {0: [], 1: []}
+for n in G.nodes():
+    # Karate club - 2 communities
+    if G.nodes[n]['club'] == 'Mr. Hi':
+        actual_comms[0].append(n)
+    else:
+        actual_comms[1].append(n)
+
+filename = "karate_club_QW_communities.txt"
+with open(filename, "w") as f:
+    f.write("ORIGINAL KARATE CLUB COMMUNITIES\n")
+    f.write(f"Community 1: {sorted(actual_comms[0])}\n")
+    f.write(f"Community 2: {sorted(actual_comms[1])}\n\n")
+    
+    f.write("QUANTUM WALK DETECTED SEGREGATION\n")
+    # Sort for cleaner reading
+    comm_1 = sorted(communities[0])
+    comm_2 = sorted(communities[1])
+    f.write(f"Detected Community 1: {comm_1}\n")
+    f.write(f"Detected Community 2: {comm_2}\n")
+
+print(f"Done, result in  {filename}")
+
+nx.draw(G, with_labels=True, node_color='lightblue', font_weight='bold')
+
+# 4. Display the plot
+plt.show()
