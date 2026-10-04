@@ -1,0 +1,119 @@
+import math
+import numpy as np
+import networkx as nx 
+import matplotlib.pyplot as plt
+
+w_a = 1000
+w_b = 1
+source = 1
+time_steps = 100
+dimension = 100
+adj_matrix = np.load("barabasi_adj_matrix_"+str(dimension)+"nodes.npy")
+adj_networkx = nx.from_numpy_array(adj_matrix)
+
+deg_list = np.zeros(dimension)
+for i in range(dimension):
+    deg_list[i] = np.sum(adj_matrix[i])
+
+dist_matrix = np.zeros((dimension,dimension))
+for i in range(dimension):
+    for j in range(dimension):
+        dist_matrix[i][j] = nx.shortest_path_length(adj_networkx, source=i, target=j)
+
+# COIN OPERATOR    
+def generate_coin_for_node(n):
+    neighbours = []
+    for i in range(len(adj_matrix)):
+        if adj_matrix[n][i] != 0:
+            neighbours.append(i)
+    node_coin_size = len(neighbours)
+    
+    bra_s = np.zeros(node_coin_size)
+    for i in range(node_coin_size):
+        if dist_matrix[source][n] > dist_matrix[source][i]:
+            bra_s[i] = math.sqrt(w_a)
+        elif dist_matrix[source][n] <= dist_matrix[source][i]:
+            bra_s[i] = math.sqrt(w_b)
+    bra_s = bra_s.reshape(1,-1)
+    bra_s = bra_s/np.linalg.norm(bra_s)
+                                             # check if bra and ket are correct
+    ket_s = bra_s.conj().T                   # if functions are working properly
+    node_coin = 2*(np.dot(ket_s,bra_s)) - np.eye(node_coin_size)
+    return(node_coin)
+    
+size_coin_operator = np.sum(adj_matrix)# for unweighted networks
+coin_operator = np.zeros((size_coin_operator,size_coin_operator)) 
+
+mark = 0
+for i in range(dimension):
+    node_coin = generate_coin_for_node(i)
+    for j in range(len(node_coin)):
+        for k in range(len(node_coin)):
+            coin_operator[j+mark][k+mark] = node_coin[j][k]
+    mark += len(node_coin) 
+
+
+# SHIFT OPERATOR
+shift_operator = np.zeros((len(coin_operator),len(coin_operator)))
+link_count_list = np.zeros(dimension)
+
+for i in range(len(adj_matrix)):
+    j = 0
+    while j<=i:
+        if adj_matrix[i][j] != 0:   # only unweighted, undirected graphs
+            pos_i = int(np.sum(deg_list[:i]) + link_count_list[i]) 
+            pos_j = int(np.sum(deg_list[:j]) + link_count_list[j])     
+            shift_operator[pos_i][pos_j] = 1
+            shift_operator[pos_j][pos_i] = 1
+            link_count_list[i] +=1
+            link_count_list[j] +=1
+        j+=1
+     
+
+# WALK  
+index_map = {}   # for setting initial state
+counter = 0
+for i in range(dimension):
+    j = 0
+    while j < deg_list[i]:
+        index_map.update({counter:i})
+        counter+=1
+        j+=1
+        
+        
+state_initial = np.zeros(len(coin_operator))  
+for i in range(len(coin_operator)):
+    for j in range(len(coin_operator)):
+        if shift_operator[i][j] !=0:
+            connection = j
+            break
+    
+    if dist_matrix[index_map[source]][index_map[i]] > dist_matrix[index_map[source]][index_map[connection]] :
+        state_initial[i] = np.sqrt(w_a)
+    elif dist_matrix[index_map[source]][index_map[i]] <= dist_matrix[index_map[source]][index_map[connection]] :
+        state_initial[i] = np.sqrt(w_b)
+state_initial = state_initial/np.linalg.norm(state_initial)
+        
+trans_operator = np.dot(shift_operator,coin_operator)
+state_final = (np.dot(np.linalg.matrix_power(trans_operator,time_steps),state_initial))     
+
+    
+# PLOTTING         
+probability = np.zeros(dimension)
+counter = 0
+for i in range(dimension):
+    prob = 0
+    node_states = int(deg_list[i])
+    for j in range(node_states):
+        prob += abs(state_final[counter]**2) 
+        counter+=1
+    probability[i] = prob
+
+plt.scatter(deg_list,probability)
+plt.title('Q_walk_vec')
+plt.xlabel("degree of node")
+plt.ylabel("probability after 100 steps")
+plt.grid(True)   
+plt.show()
+
+np.save("Q_walk_vec_trans_matrix_"+str(dimension)+"nodes",trans_operator)
