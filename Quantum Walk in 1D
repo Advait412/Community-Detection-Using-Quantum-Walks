@@ -1,0 +1,62 @@
+import numpy as np
+
+N = 100 # Define N
+initial_position = 0
+position_intl = initial_position + N
+c = complex(0,1)
+# Define basis states
+ket_up = np.array([[1], [0]])
+bra_up = np.array([[1, 0]])
+ket_down = np.array([[0], [1]])
+bra_down = np.array([[0, 1]])
+
+# Projectors
+up_chooser = np.dot(ket_up, bra_up)
+down_chooser = np.dot(ket_down, bra_down)
+
+
+# Define right shifter
+right_shifter = np.zeros((2 * N + 1, 2 * N + 1))
+for i in range(2 * N):
+    ket = np.zeros((2 * N + 1, 1))
+    bra = np.zeros((1, 2 * N + 1))
+    ket[i + 1, 0] = 1
+    bra[0, i] = 1
+    right_shifter += np.dot(ket, bra)
+
+
+# Define left shifter
+left_shifter = np.zeros((2 * N + 1, 2 * N + 1))
+for i in range(1, 2 * N + 1):
+    ket = np.zeros((2 * N + 1, 1))
+    bra = np.zeros((1, 2 * N + 1))
+    ket[i - 1, 0] = 1
+    bra[0, i] = 1
+    left_shifter += np.dot(ket, bra)
+
+# Define the S Operator
+S = np.kron(up_chooser, right_shifter) + np.kron(down_chooser, left_shifter)
+
+# Define Hadamard Coin Operator
+C = (1 / np.sqrt(2)) * np.array([[1, 1], [1,-1]])
+I = np.eye(2 * N + 1)
+
+C_cross_I = np.kron(C, I)
+U = np.dot(S, C_cross_I)
+
+# Define Initial State
+ket_intl = np.zeros((2 * N + 1, 1))
+ket_intl[position_intl, 0] = 1  # Fix the indexing issue
+
+state_intl_1 = np.kron(ket_up, ket_intl)
+state_intl_2 = c*np.kron(ket_down, ket_intl)
+
+# Apply the Walk Operator `N` Times
+Multiplied_operator = np.linalg.matrix_power(U, N-1)
+
+# Compute the Final State
+ket_final = np.dot(Multiplied_operator, 2**(-0.5)*(state_intl_2))
+
+# Save the Final State
+np.save(f"Final_State_{N}_2.npy", ket_final)
+
