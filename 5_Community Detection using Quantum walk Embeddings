@@ -1,0 +1,209 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from torch_geometric.datasets import KarateClub
+
+# Load Karate Club graph
+dataset = KarateClub()
+data = dataset[0]
+n_nodes = data.num_nodes
+labels = data.y.numpy()   # community labels (0 or 1)
+n = len(labels)
+edge_index = data.edge_index.numpy()
+
+# Build adjacency matrix
+Adj = np.zeros((n_nodes, n_nodes))
+for i, j in edge_index.T:
+    Adj[i, j] = 1
+    Adj[j, i] = 1
+
+# Build Degree list
+deg_list = []
+for i in range(n_nodes):
+    deg_list.append(np.sum(Adj[i]))
+    
+# Build neighbour list
+# neighbour_list[i] = list of neighbours of node i
+neighbour_list = []
+for i in range(n_nodes):
+    neighbours = []
+    for j in range(n_nodes):
+        if Adj[i, j] == 1:
+            neighbours.append(j)
+    neighbour_list.append(neighbours)
+    
+# Build directed edge list
+edges = []
+edge_to_index = {}
+index = 0
+for i in range(n_nodes):
+    for j in neighbour_list[i]:
+        edges.append((i,j))
+        edge_to_index[(i,j)] = index
+        index += 1
+        
+op_size = index  
+
+# SHIFT OPERATOR
+S = np.zeros((op_size,op_size))
+for (i,j), col in edge_to_index.items():
+    if (j,i) in edge_to_index:            
+        row = edge_to_index[(j,i)]
+        S[row, col] = 1
+        
+a = 150.0
+b = 1.0
+
+C = np.zeros((op_size,op_size))
+mark = 0  # keeps track of where each block starts
+
+for i in range(n_nodes):
+    neighbours = neighbour_list[i]
+    d = len(neighbours)
+    # create s vector
+    s = np.zeros(d)
+    for k, j in enumerate(neighbours):
+        # find common neighbours
+        common = set(neighbour_list[i]).intersection(neighbour_list[j])
+        if len(common) == 0:
+            s[k] = a
+        else:
+            s[k] = b
+ 
+    # normalize s
+    s = s / np.linalg.norm(s)
+    # Grover coin block
+    block = 2 * np.outer(s,s) - np.eye(d)
+    # place block inside big coin matrix
+    C[mark:mark+d, mark:mark+d] = block
+    mark += d
+
+# Quantum walk operator
+U = S @ C
+
+#  global vectors 
+# psi_1 uniform superposition over all directed edges
+psi_1 = np.zeros(op_size)
+for i in range(len(psi_1)):
+    deg = deg_list[edges[i][0]]
+    psi_1[i] = 1/np.sqrt(n_nodes*deg)
+    
+# Time evolve
+t_steps = 30
+states = []
+current_state = psi_1.copy()
+for t in range(t_steps):
+    current_state = U @ current_state
+    states.append(current_state)
+
+
+# Convert edge probabilities to node probabilities
+node_probabilities = []
+for state in states:
+    probs = np.zeros(n_nodes)
+    for k, (i, j) in enumerate(edges):
+        probs[i] += abs(state[k])**2
+    node_probabilities.append(probs)
+global_vectors = np.array(node_probabilities).T
+
+# local vectors
+local_vectors = []
+for i in range(n_nodes):
+    intl_state = np.zeros(op_size)
+    acc_prob = np.zeros(op_size)
+    # need to get edges of the node i
+    start = int(np.sum(deg_list[:i]))
+    for k in range(int(deg_list[i])):
+        intl_state[start + k] = 1 / np.sqrt(deg_list[i])
+    current_state = intl_state
+    acc_prob += current_state
+    for t in range(n_nodes): # evolving to time equal to num nodes
+        current_state = U @ current_state
+        acc_prob += abs(current_state)**2
+        
+    probs = np.zeros(n_nodes)
+    node_probabilities = []
+    for k, (u, v) in enumerate(edges):
+        probs[u] += acc_prob[k]
+    probs = np.sort(probs)
+    local_vectors.append(probs)
+
+embedding = []
+for i in range(n_nodes):
+    embedding.append(np.concatenate((global_vectors[i],local_vectors[i])))
+
+    
+# Checking if same community vectors have larger cosine similarity
+
+same_comm = []
+diff_comm = []
+
+from sklearn.metrics.pairwise import cosine_similarity
+
+similarity_matrix = cosine_similarity(embedding)
+
+for i in range(n_nodes):
+    for j in range(i+1, n_nodes):
+
+        if labels[i] == labels[j]:
+            same_comm.append(similarity_matrix[i,j])
+        else:
+            diff_comm.append(similarity_matrix[i,j])
+
+same_comm = np.array(same_comm)
+diff_comm = np.array(diff_comm)
+
+print("Average similarity (same community):", np.mean(same_comm))
+print("Std similarity (same community):", np.std(same_comm))
+print("Average similarity (different community):", np.mean(diff_comm))
+print("Std similarity (different community):", np.std(diff_comm))
+
+
+all_vals = []
+same_comm_vals = []
+comm1_vals = []
+comm2_vals = []
+diff_comm_vals = []
+
+for i in range(n):
+    for j in range(i+1, n):
+
+        sim = similarity_matrix[i, j]
+        all_vals.append(sim)
+
+        if labels[i] == labels[j]:
+            same_comm_vals.append(sim)
+            # pairs inside each community
+            if labels[i] == 0:
+                comm1_vals.append(sim)
+            if labels[i] == 1:
+                comm2_vals.append(sim)
+        else:
+            diff_comm_vals.append(sim)
+            
+plt.figure(figsize=(12,10))
+
+# 1: all similarities
+plt.subplot(2,2,1)
+plt.hist(all_vals, bins=20)
+plt.title("All cosine similarities, t_steps = "+str(t_steps))
+
+# 2: same community
+plt.subplot(2,2,2)
+plt.hist(same_comm_vals, bins=20)
+plt.title("Same community pairs")
+
+# 3: first community only
+plt.subplot(2,2,3)
+plt.hist(comm2_vals, bins=20)
+plt.title("Community 0 pairs")
+
+
+# 5: different communities
+plt.subplot(2,2,4)
+plt.hist(diff_comm_vals, bins=20)
+plt.title("Different community pairs")
+
+plt.tight_layout()
+plt.show()
+    
+  
